@@ -1,6 +1,6 @@
 
 import React, { useState, useRef } from 'react';
-import { ProposalFormData } from '../types';
+import { ProposalFormData, Attachment } from '../types';
 import { Icons } from './Icon';
 
 interface InputStepProps {
@@ -17,17 +17,26 @@ const InputStep: React.FC<InputStepProps> = ({ onSubmit, isSubmitting }) => {
     keywords: '',
     standards: '',
     tone: 'professional',
+    pageCount: 50,
     model: 'gemini-2.5-flash',
-    images: []
+    images: [],
+    attachments: [],
+    templates: []
   });
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const docInputRef = useRef<HTMLInputElement>(null);
+  const templateInputRef = useRef<HTMLInputElement>(null);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    setFormData(prev => ({ 
+      ...prev, 
+      [name]: name === 'pageCount' ? (parseInt(value) || 0) : value 
+    }));
   };
 
+  // --- Image Handling ---
   const handleImageUpload = (file: File) => {
     if (!file.type.startsWith('image/')) return;
     
@@ -42,26 +51,21 @@ const InputStep: React.FC<InputStepProps> = ({ onSubmit, isSubmitting }) => {
     reader.readAsDataURL(file);
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       Array.from(e.target.files).forEach(handleImageUpload);
     }
-    // Reset input so same file can be selected again if needed
     e.target.value = '';
   };
 
   const handlePaste = (e: React.ClipboardEvent) => {
     const items = e.clipboardData.items;
-    let hasImage = false;
-
     for (let i = 0; i < items.length; i++) {
       if (items[i].type.indexOf('image') !== -1) {
-        hasImage = true;
         const blob = items[i].getAsFile();
         if (blob) handleImageUpload(blob);
       }
     }
-    // We don't prevent default if it's text, so text paste still works
   };
 
   const removeImage = (index: number) => {
@@ -71,10 +75,77 @@ const InputStep: React.FC<InputStepProps> = ({ onSubmit, isSubmitting }) => {
     }));
   };
 
+  // --- Generic File Handling Helper ---
+  const processFileUpload = (file: File, callback: (att: Attachment) => void) => {
+     // Validation
+     const validTypes = ['application/pdf', 'text/plain', 'text/markdown'];
+     // Note: We warn about Word but allow upload if browser detects mime correctly, 
+     // though we strongly suggest PDF for the API.
+     
+     if (!validTypes.includes(file.type) && !file.name.endsWith('.md') && !file.name.endsWith('.txt')) {
+         alert(`文件 "${file.name}" 格式不支持。为了获得最佳排版效果，请上传 PDF 或 TXT/Markdown 文件。Word 文档请先另存为 PDF。`);
+         return;
+     }
+
+     const reader = new FileReader();
+     reader.onload = (e) => {
+       const base64 = e.target?.result as string;
+       callback({
+         name: file.name,
+         mimeType: file.type || 'text/plain',
+         data: base64
+       });
+     };
+     reader.readAsDataURL(file);
+  };
+
+  // --- Tender Doc Handling ---
+  const handleDocSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      Array.from(e.target.files).forEach(file => {
+        processFileUpload(file as File, (att) => {
+          setFormData(prev => ({ ...prev, attachments: [...prev.attachments, att] }));
+        });
+      });
+    }
+    e.target.value = '';
+  };
+
+  const removeDoc = (index: number) => {
+    setFormData(prev => ({
+      ...prev,
+      attachments: prev.attachments.filter((_, i) => i !== index)
+    }));
+  };
+
+  // --- Template Handling ---
+  const handleTemplateSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      Array.from(e.target.files).forEach(file => {
+        processFileUpload(file as File, (att) => {
+          setFormData(prev => ({ ...prev, templates: [...prev.templates, att] }));
+        });
+      });
+    }
+    e.target.value = '';
+  };
+
+  const removeTemplate = (index: number) => {
+    setFormData(prev => ({
+      ...prev,
+      templates: prev.templates.filter((_, i) => i !== index)
+    }));
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (formData.projectName && (formData.requirements || formData.images.length > 0)) {
+    // Validate
+    const hasRequirements = formData.requirements.trim().length > 0 || formData.images.length > 0 || formData.attachments.length > 0;
+    
+    if (formData.projectName && hasRequirements) {
       onSubmit(formData);
+    } else {
+        alert("请填写项目名称，并提供至少一项需求描述（文字、图片或招标文件）。");
     }
   };
 
@@ -93,7 +164,7 @@ const InputStep: React.FC<InputStepProps> = ({ onSubmit, isSubmitting }) => {
         
         <form onSubmit={handleSubmit} className="p-8 space-y-8">
           
-          {/* Project Name - Full Width */}
+          {/* Project Name */}
           <div className="space-y-2">
             <label htmlFor="projectName" className="block text-sm font-semibold text-slate-700">
               项目名称 <span className="text-red-500">*</span>
@@ -179,6 +250,92 @@ const InputStep: React.FC<InputStepProps> = ({ onSubmit, isSubmitting }) => {
             />
           </div>
 
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Tender Docs Upload Section */}
+            <div className="space-y-3">
+               <label className="block text-sm font-semibold text-slate-700">
+                  招标文件导入 (需求来源)
+                </label>
+                <div className="flex flex-col gap-3">
+                  <div 
+                    onClick={() => docInputRef.current?.click()}
+                    className="border-2 border-dashed border-slate-300 rounded-lg p-5 flex flex-col items-center justify-center cursor-pointer hover:bg-slate-50 hover:border-blue-400 transition-all group min-h-[140px]"
+                  >
+                    <Icons.FileUp className="w-8 h-8 text-slate-400 group-hover:text-blue-500 mb-2" />
+                    <p className="text-sm text-slate-600 font-medium">上传需求文档</p>
+                    <p className="text-xs text-slate-400 mt-1">支持 PDF, TXT</p>
+                    <input 
+                      type="file" 
+                      ref={docInputRef} 
+                      accept=".pdf,.txt,.md" 
+                      multiple 
+                      className="hidden" 
+                      onChange={handleDocSelect}
+                    />
+                  </div>
+                  
+                  {/* Tender File List */}
+                  {formData.attachments.length > 0 && (
+                    <div className="bg-slate-50 rounded-lg border border-slate-200 divide-y divide-slate-200">
+                      {formData.attachments.map((file, idx) => (
+                        <div key={idx} className="flex items-center justify-between p-2">
+                          <div className="flex items-center gap-2 overflow-hidden">
+                             <Icons.FileText className="w-4 h-4 text-blue-500 flex-shrink-0" />
+                             <span className="text-xs text-slate-700 truncate max-w-[150px]">{file.name}</span>
+                          </div>
+                          <button type="button" onClick={() => removeDoc(idx)} className="text-slate-400 hover:text-red-500">
+                            <Icons.X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+            </div>
+
+            {/* Template Upload Section */}
+            <div className="space-y-3">
+               <label className="block text-sm font-semibold text-slate-700">
+                  文档模板 / 格式规范 (样式参考)
+                </label>
+                <div className="flex flex-col gap-3">
+                  <div 
+                    onClick={() => templateInputRef.current?.click()}
+                    className="border-2 border-dashed border-slate-300 rounded-lg p-5 flex flex-col items-center justify-center cursor-pointer hover:bg-slate-50 hover:border-purple-400 transition-all group min-h-[140px]"
+                  >
+                    <Icons.Paperclip className="w-8 h-8 text-slate-400 group-hover:text-purple-500 mb-2" />
+                    <p className="text-sm text-slate-600 font-medium">上传格式模板</p>
+                    <p className="text-xs text-slate-400 mt-1 text-center">支持 PDF, Word(请转PDF), TXT</p>
+                    <input 
+                      type="file" 
+                      ref={templateInputRef} 
+                      accept=".pdf,.txt,.md" 
+                      multiple 
+                      className="hidden" 
+                      onChange={handleTemplateSelect}
+                    />
+                  </div>
+
+                  {/* Template File List */}
+                  {formData.templates.length > 0 && (
+                    <div className="bg-slate-50 rounded-lg border border-slate-200 divide-y divide-slate-200">
+                      {formData.templates.map((file, idx) => (
+                        <div key={idx} className="flex items-center justify-between p-2">
+                          <div className="flex items-center gap-2 overflow-hidden">
+                             <Icons.Paperclip className="w-4 h-4 text-purple-500 flex-shrink-0" />
+                             <span className="text-xs text-slate-700 truncate max-w-[150px]">{file.name}</span>
+                          </div>
+                          <button type="button" onClick={() => removeTemplate(idx)} className="text-slate-400 hover:text-red-500">
+                            <Icons.X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+            </div>
+          </div>
+
           {/* Requirements with Image Support */}
           <div className="space-y-2">
             <div className="flex justify-between items-center">
@@ -186,7 +343,7 @@ const InputStep: React.FC<InputStepProps> = ({ onSubmit, isSubmitting }) => {
                 核心需求 / 招标范围 <span className="text-red-500">*</span>
               </label>
               <span className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded-full font-medium">
-                支持直接粘贴截图
+                支持截图粘贴
               </span>
             </div>
             
@@ -194,10 +351,9 @@ const InputStep: React.FC<InputStepProps> = ({ onSubmit, isSubmitting }) => {
               <textarea
                 id="requirements"
                 name="requirements"
-                required={formData.images.length === 0} // Only required if no images
-                rows={6}
+                rows={5}
                 onPaste={handlePaste}
-                placeholder="在此输入文字，或直接 Ctrl+V 粘贴需求文档截图、架构草图、旧系统界面等..."
+                placeholder="在此简述需求，或粘贴需求文档截图。如果已上传招标文件，此处可留空或仅写重点。"
                 className="w-full px-4 py-3 border-none focus:ring-0 resize-y outline-none block"
                 value={formData.requirements}
                 onChange={handleChange}
@@ -226,21 +382,20 @@ const InputStep: React.FC<InputStepProps> = ({ onSubmit, isSubmitting }) => {
               <div className="bg-slate-50 px-3 py-2 border-t border-slate-200 flex items-center">
                 <input 
                   type="file" 
-                  ref={fileInputRef} 
+                  ref={imageInputRef} 
                   accept="image/*" 
                   multiple 
                   className="hidden" 
-                  onChange={handleFileSelect}
+                  onChange={handleImageSelect}
                 />
                 <button
                   type="button"
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={() => imageInputRef.current?.click()}
                   className="flex items-center gap-2 text-sm text-slate-600 hover:text-blue-600 transition-colors px-2 py-1 rounded hover:bg-slate-200"
                 >
                   <Icons.Image className="w-4 h-4" />
                   添加图片附件
                 </button>
-                <span className="text-xs text-slate-400 ml-2">支持 JPG, PNG, WEBP</span>
               </div>
             </div>
           </div>
@@ -280,38 +435,63 @@ const InputStep: React.FC<InputStepProps> = ({ onSubmit, isSubmitting }) => {
             </div>
           </div>
 
-          {/* Tone */}
-          <div className="space-y-2">
-            <label htmlFor="tone" className="block text-sm font-semibold text-slate-700">
-              方案语调与风格
-            </label>
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-               {[
-                 { id: 'professional', label: '稳健专业', desc: '标准商务风格' },
-                 { id: 'technical', label: '深度技术', desc: '强调架构细节' },
-                 { id: 'persuasive', label: '销售导向', desc: '强调价值与优势' },
-                 { id: 'concise', label: '精炼务实', desc: '直击核心方案' },
-               ].map((t) => (
-                 <label 
-                  key={t.id}
-                  className={`relative flex flex-col items-center p-3 rounded-lg border-2 cursor-pointer transition-all ${
-                    formData.tone === t.id 
-                    ? 'border-blue-500 bg-blue-50' 
-                    : 'border-slate-200 hover:border-slate-300'
-                  }`}
-                 >
-                   <input 
-                    type="radio" 
-                    name="tone" 
-                    value={t.id} 
-                    checked={formData.tone === t.id}
-                    onChange={handleChange}
-                    className="sr-only"
-                   />
-                   <span className={`text-sm font-bold ${formData.tone === t.id ? 'text-blue-700' : 'text-slate-700'}`}>{t.label}</span>
-                   <span className="text-xs text-slate-500 mt-1">{t.desc}</span>
-                 </label>
-               ))}
+          {/* Tone & Page Count */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="space-y-2 md:col-span-2">
+              <label htmlFor="tone" className="block text-sm font-semibold text-slate-700">
+                方案语调与风格
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                 {[
+                   { id: 'professional', label: '稳健专业', desc: '标准商务' },
+                   { id: 'technical', label: '深度技术', desc: '架构细节' },
+                   { id: 'persuasive', label: '销售导向', desc: '价值优先' },
+                   { id: 'concise', label: '精炼务实', desc: '直击核心' },
+                 ].map((t) => (
+                   <label 
+                    key={t.id}
+                    className={`relative flex flex-col items-center p-3 rounded-lg border-2 cursor-pointer transition-all ${
+                      formData.tone === t.id 
+                      ? 'border-blue-500 bg-blue-50' 
+                      : 'border-slate-200 hover:border-slate-300'
+                    }`}
+                   >
+                     <input 
+                      type="radio" 
+                      name="tone" 
+                      value={t.id} 
+                      checked={formData.tone === t.id}
+                      onChange={handleChange}
+                      className="sr-only"
+                     />
+                     <span className={`text-sm font-bold ${formData.tone === t.id ? 'text-blue-700' : 'text-slate-700'}`}>{t.label}</span>
+                     <span className="text-xs text-slate-500 mt-1">{t.desc}</span>
+                   </label>
+                 ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="pageCount" className="block text-sm font-semibold text-slate-700">
+                预计方案页数
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  id="pageCount"
+                  name="pageCount"
+                  min="5"
+                  max="500"
+                  placeholder="例如：50"
+                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all outline-none"
+                  value={formData.pageCount || ''}
+                  onChange={handleChange}
+                  disabled={isSubmitting}
+                />
+                <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500 text-sm">
+                  页
+                </div>
+              </div>
             </div>
           </div>
 

@@ -9,12 +9,21 @@ import {
   CheckCircle, 
   Copy, 
   RefreshCw, 
-  ArrowLeft,
+  ArrowLeft, 
   PenTool,
   Download,
   Image,
   X,
-  Plus
+  Plus,
+  FileUp,
+  Paperclip,
+  Trash2,
+  File,
+  Sparkles,
+  MessageSquarePlus,
+  Network,
+  History,
+  ClipboardCheck
 } from 'lucide-react';
 
 export const Icons = {
@@ -31,5 +40,14 @@ export const Icons = {
   Download,
   Image,
   X,
-  Plus
+  Plus,
+  FileUp,
+  Paperclip,
+  Trash2,
+  File,
+  Sparkles,
+  MessageSquarePlus,
+  Network,
+  History,
+  ClipboardCheck
 };
